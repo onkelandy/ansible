@@ -17,17 +17,6 @@ nginx_config () {
             -e "s|\(server_name\s\)\(.*\)\(\s\$hostname;\)|\1${domain}\3|" /etc/nginx/conf.d/https.conf 2>&1
     sudo sed -i -e "s|^\([[:space:]]*\)#server_name|\1server_name|" \
             -e "s|\(server_name\s\)\(.*\)\(\s\$hostname;\)|\1${domain}\3|" /etc/nginx/sites-available/default 2>&1
-    sudo sed -i 's/#listen/listen/g' /etc/nginx/conf.d/https.conf 2>&1
-    sudo sed -i -e "s|^\([[:space:]]*\)#ssl_certificate|\1ssl_certificate|" \
-            -e "s|ssl_certificate\s\+/etc/letsencrypt/live/[^/]\+/fullchain\.pem;|ssl_certificate /etc/letsencrypt/live/${domain}/fullchain.pem;|" /etc/nginx/conf.d/https.conf 2>&1
-    sudo sed -i -e "s|^\([[:space:]]*\)#ssl_certificate_key|\1ssl_certificate_key|" \
-            -e "s|ssl_certificate_key\s\+/etc/letsencrypt/live/[^/]\+/privkey\.pem;|ssl_certificate_key /etc/letsencrypt/live/${domain}/privkey.pem;|" /etc/nginx/conf.d/https.conf 2>&1
-    sudo sed -i -e "s|^\([[:space:]]*\)#ssl_trusted_certificate|\1ssl_trusted_certificate|" \
-            -e "s|ssl_trusted_certificate\s\+/etc/letsencrypt/live/[^/]\+/fullchain\.pem;|ssl_trusted_certificate /etc/letsencrypt/live/${domain}/fullchain.pem;|" /etc/nginx/conf.d/https.conf 2>&1
-    sudo sed -i 's/#ssl_client_certificate/ssl_client_certificate/g' /etc/nginx/conf.d/https.conf 2>&1
-    sudo sed -i 's/#ssl_crl/ssl_crl/g' /etc/nginx/conf.d/https.conf 2>&1
-    sudo sed -i 's/#ssl_verify_client/ssl_verify_client/g' /etc/nginx/conf.d/https.conf 2>&1
-    sudo sed -i 's/#ssl_dhparam/ssl_dhparam/g' /etc/nginx/conf.d/https.conf 2>&1
     unset pw
     echo ""
     echo "You have to put your private key password in the lua script to make reverse proxy work correctly."
@@ -39,12 +28,12 @@ nginx_config () {
 
     echo "The following two inputs are only relevant if you want to use Amazon Alexa."
     read -p "Please enter Alexa username (Hit enter to skip): " alexa_user
-	read -p "Please enter Alexa password (Hit enter to skip): " alexa_pw
+	  read -p "Please enter Alexa password (Hit enter to skip): " alexa_pw
     if [ $alexa_user ]; then
         sudo htpasswd -cb /etc/nginx/.alexa $alexa_user $alexa_pw 2>&1
     fi
 
-    IP=$(sudo ip addr list eth0 |grep 'inet ' |cut -d' ' -f6|cut -d/ -f1)
+    IP=$(ip -4 addr show eth0 | awk '/inet / {print $2}' | cut -d/ -f1)
     echo ""
     echo ""
     echo "Creating Letsencrypt certificate"
@@ -81,10 +70,27 @@ nginx_config () {
         while ! [[ "$mail" =~ $mail_regex ]]; do
             read -p "Please define your email (name@domain.tld): " mail
         done
-        crt=$(sudo certbot certonly --non-interactive --agree-tos --email ${mail} --rsa-key-size 4096 --webroot -w /var/www/letsencrypt -d ${domain})
-        echo "Done: ${crt}"
+        crt=$(sudo certbot certonly --non-interactive --agree-tos --email ${mail} --rsa-key-size 4096 --webroot -w /var/www/letsencrypt -d ${domain} 2>&1)
+        echo "Done:"
+        printf "%s\n" "$crt"
         echo ""
-        echo "Now change the port forwarding from 80 to 443 on your router! Restarting nginx now."
+        if grep -q "Successfully received certificate." <<< "$crt"; then
+            echo "Success!"
+            sudo sed -i 's/#listen/listen/g' /etc/nginx/conf.d/https.conf 2>&1
+            sudo sed -i -e "s|^\([[:space:]]*\)#ssl_certificate|\1ssl_certificate|" \
+                    -e "s|ssl_certificate\s\+/etc/letsencrypt/live/[^/]\+/fullchain\.pem;|ssl_certificate /etc/letsencrypt/live/${domain}/fullchain.pem;|" /etc/nginx/conf.d/https.conf 2>&1
+            sudo sed -i -e "s|^\([[:space:]]*\)#ssl_certificate_key|\1ssl_certificate_key|" \
+                    -e "s|ssl_certificate_key\s\+/etc/letsencrypt/live/[^/]\+/privkey\.pem;|ssl_certificate_key /etc/letsencrypt/live/${domain}/privkey.pem;|" /etc/nginx/conf.d/https.conf 2>&1
+            sudo sed -i -e "s|^\([[:space:]]*\)#ssl_trusted_certificate|\1ssl_trusted_certificate|" \
+                    -e "s|ssl_trusted_certificate\s\+/etc/letsencrypt/live/[^/]\+/fullchain\.pem;|ssl_trusted_certificate /etc/letsencrypt/live/${domain}/fullchain.pem;|" /etc/nginx/conf.d/https.conf 2>&1
+            sudo sed -i 's/#ssl_client_certificate/ssl_client_certificate/g' /etc/nginx/conf.d/https.conf 2>&1
+            sudo sed -i 's/#ssl_crl/ssl_crl/g' /etc/nginx/conf.d/https.conf 2>&1
+            sudo sed -i 's/#ssl_verify_client/ssl_verify_client/g' /etc/nginx/conf.d/https.conf 2>&1
+            sudo sed -i 's/#ssl_dhparam/ssl_dhparam/g' /etc/nginx/conf.d/https.conf 2>&1
+            echo "Now change the port forwarding from 80 to 443 on your router! Restarting nginx now."
+        else
+            echo "There was a problem.. Please try to fix ;)"
+        fi
 
 
     fi
@@ -144,7 +150,7 @@ if [[ $NGINX_e == "enabled" ]]; then
     echo "http://<YOURIP>/nodered -> If you enable node-red (later)"
     echo ""
     echo ""
-    IP=$(sudo ip addr list eth0 |grep 'inet ' |cut -d' ' -f6|cut -d/ -f1)
+    IP=$(ip -4 addr show eth0 | awk '/inet / {print $2}' | cut -d/ -f1)
     echo "You can setup nginx as a Reverse Proxy to securely access the listed websites from outside your home network."
     echo "To work correctly you need to forward port 443 in your router to the internal IP of this Raspberry Pi ($IP)."
     echo "Furthermore you need to activate a Dynamic DNS service on your Router or other network device!"
